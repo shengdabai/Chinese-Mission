@@ -14,6 +14,7 @@ mock.module("msedge-tts", {
   namedExports: {
     OUTPUT_FORMAT: { AUDIO_24KHZ_96KBITRATE_MONO_MP3: "audio-24khz-96kbitrate-mono-mp3" },
     MsEdgeTTS: class {
+      close() {}
       async setMetadata() {
         if (mode === "fail") throw new Error(SECRET_DETAIL);
       }

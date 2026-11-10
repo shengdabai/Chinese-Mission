@@ -5,18 +5,34 @@ import { NextRequest } from "next/server";
 const calls: Array<{ voice: string; rate: string }> = [];
 let lastVoice = "";
 let failWith: string | null = null;
+let failMetadata = false;
+let streamMode = "normal";
+let closed = 0;
 
 vi.mock("msedge-tts", () => {
-  const { Readable } = require("node:stream");
+  const { Readable, PassThrough } = require("node:stream");
   return {
     OUTPUT_FORMAT: { AUDIO_24KHZ_96KBITRATE_MONO_MP3: "mp3" },
     MsEdgeTTS: class {
       async setMetadata(voice: string) {
         lastVoice = voice;
+        if (failMetadata) throw new Error("Connection failed");
       }
+      close() { closed++; }
       toStream(_text: string, opts: { rate: string }) {
         if (failWith) throw new Error(failWith);
         calls.push({ voice: lastVoice, rate: opts.rate });
+        if (streamMode === "premature") {
+          const audioStream = new PassThrough();
+          process.nextTick(() => {
+            audioStream.write(Buffer.from("partial-audio"));
+            audioStream.destroy();
+          });
+          return { audioStream };
+        }
+        if (streamMode === "oversized") {
+          return { audioStream: Readable.from([Buffer.alloc(2 * 1024 * 1024 + 1)]) };
+        }
         return { audioStream: Readable.from([Buffer.from("synthetic-audio")]) };
       }
     },
@@ -37,8 +53,25 @@ function req(payload: unknown, headers: Record<string, string> = {}) {
 beforeEach(() => {
   resetRateLimits();
   failWith = null;
+  failMetadata = false;
+  streamMode = "normal";
+  closed = 0;
   calls.length = 0;
   vi.spyOn(console, "error").mockImplementation(() => {});
+});
+
+describe("TTS resource lifecycle", () => {
+  it.each(["normal", "premature", "oversized", "metadata", "synthesis"])(
+    "closes the provider connection after %s", async (mode) => {
+      streamMode = mode;
+      failMetadata = mode === "metadata";
+      failWith = mode === "synthesis" ? "Synthesis failed" : null;
+      const res = await POST(req({ text: "你好" }));
+      expect(res.status).toBe(mode === "normal" ? 200 : 502);
+      if (mode === "normal") expect(res.headers.get("Cache-Control")).toBe("private, no-store");
+      expect(closed).toBe(1);
+    },
+  );
 });
 
 describe("POST /api/tts input boundary", () => {

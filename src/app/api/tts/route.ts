@@ -70,8 +70,9 @@ export async function POST(request: NextRequest) {
   const ratePctClamped = Math.max(-50, Math.min(50, ratePct));
   const rateStr = ratePctClamped >= 0 ? `+${ratePctClamped}%` : `${ratePctClamped}%`;
 
+  let tts: MsEdgeTTS | undefined;
   try {
-    const tts = new MsEdgeTTS();
+    tts = new MsEdgeTTS();
     await tts.setMetadata(voice, OUTPUT_FORMAT.AUDIO_24KHZ_96KBITRATE_MONO_MP3);
 
     // Plain text only: escaped so a caller cannot inject SSML tags or control characters.
@@ -91,7 +92,7 @@ export async function POST(request: NextRequest) {
         chunks.push(chunk);
       });
       stream.audioStream.on("end", () => resolve());
-      stream.audioStream.on("close", () => resolve());
+      stream.audioStream.on("close", () => reject(new Error("TTS audio stream closed before completion")));
       stream.audioStream.on("error", (err: Error) => reject(err));
     });
 
@@ -104,7 +105,7 @@ export async function POST(request: NextRequest) {
       status: 200,
       headers: {
         "Content-Type": "audio/mpeg",
-        "Cache-Control": "public, max-age=86400, immutable",
+        "Cache-Control": "private, no-store",
         "Content-Length": String(audio.length),
       },
     });
@@ -112,5 +113,7 @@ export async function POST(request: NextRequest) {
     // Upstream detail stays in the server log; the client gets a generic body (no provider internals).
     console.error("TTS error:", error instanceof Error ? error.message : String(error));
     return NextResponse.json({ error: "TTS synthesis failed", fallback: true }, { status: 502 });
+  } finally {
+    tts?.close();
   }
 }
