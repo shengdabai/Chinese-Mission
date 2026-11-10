@@ -51,7 +51,16 @@ export async function callAI(
     throw new Error(`AI API error ${response.status}`);
   }
 
-  const data = await response.json();
+  const body = await response.text();
+  let data;
+  try {
+    data = JSON.parse(body);
+  } catch {
+    // JSON parser errors can include provider body fragments. Routes log this error.
+    throw new Error(
+      `Invalid JSON from AI API (status: ${response.status}, content-type: ${response.headers.get("content-type") ?? "unknown"}, length: ${body.length})`,
+    );
+  }
   const content = data.choices?.[0]?.message?.content;
 
   if (!content) {
