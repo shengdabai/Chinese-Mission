@@ -31,6 +31,7 @@ export async function callAI(
 
   const response = await fetch(`${baseUrl}/chat/completions`, {
     method: "POST",
+    signal: AbortSignal.timeout(30_000),
     headers: {
       "Content-Type": "application/json",
       Authorization: `Bearer ${apiKey}`,
@@ -45,11 +46,21 @@ export async function callAI(
   });
 
   if (!response.ok) {
-    const errorText = await response.text();
-    throw new Error(`AI API error ${response.status}: ${errorText}`);
+    // Routes log this error. Provider bodies may echo a transcript or credentials.
+    await response.body?.cancel().catch(() => {});
+    throw new Error(`AI API error ${response.status}`);
   }
 
-  const data = await response.json();
+  const body = await response.text();
+  let data;
+  try {
+    data = JSON.parse(body);
+  } catch {
+    // JSON parser errors can include provider body fragments. Routes log this error.
+    throw new Error(
+      `Invalid JSON from AI API (status: ${response.status}, content-type: ${response.headers.get("content-type") ?? "unknown"}, length: ${body.length})`,
+    );
+  }
   const content = data.choices?.[0]?.message?.content;
 
   if (!content) {
@@ -68,7 +79,7 @@ export function parseJSON<T>(raw: string): T {
   try {
     return JSON.parse(cleaned) as T;
   } catch {
-    throw new Error(`Failed to parse AI response as JSON: ${cleaned.slice(0, 100)}`);
+    throw new Error("Failed to parse AI response as JSON");
   }
 }
 

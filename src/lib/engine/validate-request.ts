@@ -13,11 +13,15 @@ function isPlainObject(v: unknown): v is Record<string, unknown> {
   return typeof v === "object" && v !== null && !Array.isArray(v);
 }
 
+function isHintLevel(v: unknown): boolean {
+  return typeof v === "number" && Number.isInteger(v) && v >= 0 && v <= 4;
+}
+
 function validTurns(turns: unknown): boolean {
   if (!Array.isArray(turns) || turns.length > MAX_TURNS) return false;
   return turns.every((t) => {
     if (!isPlainObject(t)) return false;
-    if (typeof t.role !== "string") return false;
+    if (!["user", "npc", "system"].includes(t.role as string)) return false;
     if (typeof t.rawInput !== "string" || t.rawInput.length > MAX_TURN_TEXT_LENGTH) return false;
     if (
       t.npcReplyCn !== undefined &&
@@ -25,7 +29,12 @@ function validTurns(turns: unknown): boolean {
     ) {
       return false;
     }
-    if (t.errorTags !== undefined && !Array.isArray(t.errorTags)) return false;
+    if (t.understood !== undefined && typeof t.understood !== "boolean") return false;
+    if (t.errorTags !== undefined && (!Array.isArray(t.errorTags)
+      || !t.errorTags.every((tag) => typeof tag === "string"))) return false;
+    if (t.hintUsed !== undefined && !isHintLevel(t.hintUsed)) return false;
+    if (t.detectedScript !== undefined
+      && !["hanzi", "pinyin", "mixed", "en"].includes(t.detectedScript as string)) return false;
     return true;
   });
 }
@@ -49,8 +58,8 @@ export function validateChatBody(body: unknown): string | null {
   if (typeof session.currentState !== "string") return "session.currentState must be a string";
   if (!validSlots(session.slotsFilledMap)) return "session.slotsFilledMap must be an object of strings";
   if (!validTurns(session.turns)) return "session.turns is invalid or too long";
-  if (typeof session.hintLevel !== "number" || !Number.isFinite(session.hintLevel)) {
-    return "session.hintLevel must be a number";
+  if (!isHintLevel(session.hintLevel)) {
+    return "session.hintLevel must be an integer from 0 to 4";
   }
   return null;
 }
@@ -65,9 +74,10 @@ export function validateDebriefBody(body: unknown): string | null {
   if (!validTurns(session.turns)) return "session.turns is invalid or too long";
   if (
     session.hintUsageCount !== undefined &&
-    (typeof session.hintUsageCount !== "number" || !Number.isFinite(session.hintUsageCount))
+    (typeof session.hintUsageCount !== "number" || !Number.isSafeInteger(session.hintUsageCount)
+      || session.hintUsageCount < 0)
   ) {
-    return "session.hintUsageCount must be a number";
+    return "session.hintUsageCount must be a non-negative safe integer";
   }
   return null;
 }
